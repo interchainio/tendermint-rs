@@ -55,8 +55,8 @@ struct Handshake<S> {
 /// Handshake states
 
 /// AwaitingEphKey means we're waiting for the remote ephemeral pubkey.
-struct AwaitingEphKey {
-    local_privkey: ed25519::Keypair,
+struct AwaitingEphKey<'a> {
+    local_privkey: &'a ed25519::Keypair,
     local_eph_privkey: Option<EphemeralSecret>,
 }
 
@@ -69,10 +69,10 @@ struct AwaitingAuthSig {
     local_signature: ed25519::Signature,
 }
 
-impl Handshake<AwaitingEphKey> {
+impl<'a> Handshake<AwaitingEphKey<'a>> {
     /// Initiate a handshake.
     pub fn new(
-        local_privkey: ed25519::Keypair,
+        local_privkey: &'a ed25519::Keypair,
         protocol_version: Version,
     ) -> (Self, EphemeralPublic) {
         // Generate an ephemeral key for perfect forward secrecy.
@@ -140,9 +140,9 @@ impl Handshake<AwaitingEphKey> {
 
         // Sign the challenge bytes for authentication.
         let local_signature = if self.protocol_version.has_transcript() {
-            sign_challenge(&sc_mac, &self.state.local_privkey)?
+            sign_challenge(&sc_mac, self.state.local_privkey)?
         } else {
-            sign_challenge(&kdf.challenge, &self.state.local_privkey)?
+            sign_challenge(&kdf.challenge, self.state.local_privkey)?
         };
 
         Ok(Handshake {
@@ -210,11 +210,11 @@ impl<IoHandler: Read + Write + Send + Sync> SecretConnection<IoHandler> {
     /// Performs a handshake and returns a new SecretConnection.
     pub fn new(
         mut io_handler: IoHandler,
-        local_privkey: ed25519::Keypair,
+        local_privkey: &ed25519::Keypair,
         protocol_version: Version,
     ) -> Result<SecretConnection<IoHandler>> {
         // Start a handshake process.
-        let local_pubkey = PublicKey::from(&local_privkey);
+        let local_pubkey = PublicKey::from(local_privkey);
         let (mut h, local_eph_pubkey) = Handshake::new(local_privkey, protocol_version);
 
         // Write local ephemeral pubkey and receive one too.
@@ -324,31 +324,36 @@ where
         if !self.recv_buffer.is_empty() {
             let n = cmp::min(data.len(), self.recv_buffer.len());
             data.copy_from_slice(&self.recv_buffer[..n]);
-            let mut leftover_portion = vec![0; self.recv_buffer.len().checked_sub(n).unwrap()];
+            let mut leftover_portion =
+                vec![0; self.recv_buffer.len().checked_sub(n).expect("no overflow")];
             leftover_portion.clone_from_slice(&self.recv_buffer[n..]);
             self.recv_buffer = leftover_portion;
 
             return Ok(n);
         }
 
-        let mut sealed_frame = [0u8; TAG_SIZE + TOTAL_FRAME_SIZE];
+        let mut sealed_frame = [0_u8; TAG_SIZE + TOTAL_FRAME_SIZE];
         self.io_handler.read_exact(&mut sealed_frame)?;
 
         // decrypt the frame
-        let mut frame = [0u8; TOTAL_FRAME_SIZE];
+        let mut frame = [0_u8; TOTAL_FRAME_SIZE];
         let res = self.decrypt(&sealed_frame, &mut frame);
 
         if res.is_err() {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                res.err().unwrap().to_string(),
+                res.err().expect("err to not be None").to_string(),
             ));
         }
 
         self.recv_nonce.increment();
         // end decryption
 
-        let chunk_length = u32::from_le_bytes(frame[..4].try_into().unwrap());
+        let chunk_length = u32::from_le_bytes(
+            frame[..4]
+                .try_into()
+                .expect("frame to contain at least 4 bytes"),
+        );
 
         if chunk_length as usize > DATA_MAX_SIZE {
             return Err(io::Error::new(
@@ -359,11 +364,15 @@ where
 
         let mut chunk = vec![0; chunk_length as usize];
         chunk.clone_from_slice(
-            &frame[DATA_LEN_SIZE..(DATA_LEN_SIZE.checked_add(chunk_length as usize).unwrap())],
+            &frame[DATA_LEN_SIZE
+                ..(DATA_LEN_SIZE
+                    .checked_add(chunk_length as usize)
+                    .expect("no overflow"))],
         );
 
         let n = cmp::min(data.len(), chunk.len());
         data[..n].copy_from_slice(&chunk[..n]);
+        self.recv_buffer = vec![0; chunk[n..].len()];
         self.recv_buffer.copy_from_slice(&chunk[n..]);
 
         Ok(n)
@@ -377,7 +386,7 @@ where
     // Writes encrypted frames of `TAG_SIZE` + `TOTAL_FRAME_SIZE`
     // CONTRACT: data smaller than DATA_MAX_SIZE is read atomically.
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        let mut n = 0usize;
+        let mut n = 0_usize;
         let mut data_copy = data;
         while !data_copy.is_empty() {
             let chunk: &[u8];
@@ -386,21 +395,21 @@ where
                 data_copy = &data_copy[DATA_MAX_SIZE..];
             } else {
                 chunk = data_copy;
-                data_copy = &[0u8; 0];
+                data_copy = &[0_u8; 0];
             }
-            let sealed_frame = &mut [0u8; TAG_SIZE + TOTAL_FRAME_SIZE];
+            let sealed_frame = &mut [0_u8; TAG_SIZE + TOTAL_FRAME_SIZE];
             let res = self.encrypt(chunk, sealed_frame);
             if res.is_err() {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
-                    res.err().unwrap().to_string(),
+                    res.err().expect("err to not be None").to_string(),
                 ));
             }
             self.send_nonce.increment();
             // end encryption
 
             self.io_handler.write_all(&sealed_frame[..])?;
-            n = n.checked_add(chunk.len()).unwrap();
+            n = n.checked_add(chunk.len()).expect("no overflow");
         }
 
         Ok(n)
@@ -411,19 +420,17 @@ where
     }
 }
 
-/// Returns remote_eph_pubkey
+/// Sends our pubkey and receives theirs in tandem.
 fn share_eph_pubkey<IoHandler: Read + Write + Send + Sync>(
     handler: &mut IoHandler,
     local_eph_pubkey: &EphemeralPublic,
     protocol_version: Version,
 ) -> Result<EphemeralPublic> {
-    // Send our pubkey and receive theirs in tandem.
     // TODO(ismail): on the go side this is done in parallel, here we do send and receive after
-    // each other. thread::spawn would require a static lifetime.
-    // Should still work though.
-    handler.write_all(&protocol_version.encode_initial_handshake(&local_eph_pubkey))?;
+    // each other. thread::spawn would require a static lifetime. Should still work though.
+    handler.write_all(&protocol_version.encode_initial_handshake(local_eph_pubkey))?;
 
-    let mut response_len = 0u8;
+    let mut response_len = 0_u8;
     handler.read_exact(slice::from_mut(&mut response_len))?;
 
     let mut buf = vec![0; response_len as usize];
@@ -431,7 +438,7 @@ fn share_eph_pubkey<IoHandler: Read + Write + Send + Sync>(
     protocol_version.decode_initial_handshake(&buf)
 }
 
-/// Return is of the form lo, hi
+/// Return is of the form lo, hi.
 fn sort32(first: [u8; 32], second: [u8; 32]) -> ([u8; 32], [u8; 32]) {
     if second > first {
         (first, second)
@@ -440,7 +447,7 @@ fn sort32(first: [u8; 32], second: [u8; 32]) -> ([u8; 32], [u8; 32]) {
     }
 }
 
-/// Sign the challenge with the local private key
+/// Signs the challenge with the local private key.
 fn sign_challenge(
     challenge: &[u8; 32],
     local_privkey: &dyn Signer<ed25519::Signature>,
@@ -450,16 +457,17 @@ fn sign_challenge(
         .map_err(|_| Error::CryptoError.into())
 }
 
-// TODO(ismail): change from DecodeError to something more generic
-// this can also fail while writing / sending
+/// Sends our authenticated signature and receives theirs in tandem.
 fn share_auth_signature<IoHandler: Read + Write + Send + Sync>(
     sc: &mut SecretConnection<IoHandler>,
     pubkey: &ed25519::PublicKey,
     local_signature: &ed25519::Signature,
 ) -> Result<proto::p2p::AuthSigMessage> {
+    // TODO(ismail): change from DecodeError to something more generic this can also fail while writing
+    // sending.
     let buf = sc
         .protocol_version
-        .encode_auth_signature(pubkey, &local_signature);
+        .encode_auth_signature(pubkey, local_signature);
 
     sc.write_all(&buf)?;
 
@@ -523,14 +531,14 @@ mod test {
         let peer1 = thread::spawn(|| {
             let mut csprng = OsRng {};
             let privkey1: ed25519::Keypair = ed25519::Keypair::generate(&mut csprng);
-            let conn1 = SecretConnection::new(pipe2, privkey1, Version::V0_34);
+            let conn1 = SecretConnection::new(pipe2, &privkey1, Version::V0_34);
             assert_eq!(conn1.is_ok(), true);
         });
 
         let peer2 = thread::spawn(|| {
             let mut csprng = OsRng {};
             let privkey2: ed25519::Keypair = ed25519::Keypair::generate(&mut csprng);
-            let conn2 = SecretConnection::new(pipe1, privkey2, Version::V0_34);
+            let conn2 = SecretConnection::new(pipe1, &privkey2, Version::V0_34);
             assert_eq!(conn2.is_ok(), true);
         });
 
@@ -547,7 +555,7 @@ mod test {
         let sender = thread::spawn(move || {
             let mut csprng = OsRng {};
             let privkey1: ed25519::Keypair = ed25519::Keypair::generate(&mut csprng);
-            let mut conn1 = SecretConnection::new(pipe2, privkey1, Version::V0_34)
+            let mut conn1 = SecretConnection::new(pipe2, &privkey1, Version::V0_34)
                 .expect("handshake to succeed");
 
             conn1
@@ -558,7 +566,7 @@ mod test {
         let receiver = thread::spawn(move || {
             let mut csprng = OsRng {};
             let privkey2: ed25519::Keypair = ed25519::Keypair::generate(&mut csprng);
-            let mut conn2 = SecretConnection::new(pipe1, privkey2, Version::V0_34)
+            let mut conn2 = SecretConnection::new(pipe1, &privkey2, Version::V0_34)
                 .expect("handshake to succeed");
 
             let mut buf = [0; MESSAGE.len()];
@@ -576,7 +584,7 @@ mod test {
     fn test_evil_peer_shares_invalid_eph_key() {
         let mut csprng = OsRng {};
         let local_privkey: ed25519::Keypair = ed25519::Keypair::generate(&mut csprng);
-        let (mut h, _) = Handshake::new(local_privkey, Version::V0_34);
+        let (mut h, _) = Handshake::new(&local_privkey, Version::V0_34);
         let bytes: [u8; 32] = [0; 32];
         let res = h.got_key(EphemeralPublic::from(bytes));
         assert_eq!(res.is_err(), true);
@@ -586,7 +594,7 @@ mod test {
     fn test_evil_peer_shares_invalid_auth_sig() {
         let mut csprng = OsRng {};
         let local_privkey: ed25519::Keypair = ed25519::Keypair::generate(&mut csprng);
-        let (mut h, _) = Handshake::new(local_privkey, Version::V0_34);
+        let (mut h, _) = Handshake::new(&local_privkey, Version::V0_34);
         let res = h.got_key(EphemeralPublic::from(x25519_dalek::X25519_BASEPOINT_BYTES));
         assert_eq!(res.is_err(), false);
 

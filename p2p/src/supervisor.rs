@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 
-use eyre::{Context, Report, Result};
+use eyre::{Report, Result, WrapErr};
 use flume::{unbounded, Receiver, Sender};
 
 use tendermint::node;

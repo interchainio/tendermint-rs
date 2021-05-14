@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::thread;
 
-use eyre::{eyre, Report, Result, WrapErr};
+use eyre::{eyre, Report, Result};
 use flume::{self, Receiver, Sender};
 
 use tendermint::node;
@@ -68,7 +68,7 @@ where
         let (receive_tx, receiver) = flume::unbounded::<message::Receive>();
         let mut senders = HashMap::new();
 
-        for stream_id in &stream_ids {
+        for stream_id in stream_ids {
             let (read, write) = match &self.state.connection {
                 Direction::Incoming(conn) | Direction::Outgoing(conn) => {
                     conn.open_bidirectional(stream_id)?
@@ -115,7 +115,7 @@ where
                 // TODO(xla): Log subroutine termination.
             });
 
-            senders.insert(*stream_id, write_tx);
+            senders.insert(stream_id, write_tx);
         }
 
         Ok(Peer {
