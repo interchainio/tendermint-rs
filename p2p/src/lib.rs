@@ -26,5 +26,7 @@
 )]
 
 pub mod error;
+mod message;
+mod peer;
 pub mod secret_connection;
 pub mod transport;
