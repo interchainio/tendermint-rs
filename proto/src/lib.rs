@@ -19,6 +19,7 @@ pub mod google {
 mod tendermint;
 pub use tendermint::*;
 
+mod chrono;
 mod error;
 use anomaly::BoxError;
 use bytes::{Buf, BufMut};

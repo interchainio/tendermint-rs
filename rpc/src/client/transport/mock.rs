@@ -14,7 +14,7 @@ use std::collections::HashMap;
 ///
 /// ## Examples
 ///
-/// ```rust
+/// ```rust,ignore
 /// use tendermint_rpc::{Client, Method, MockClient, MockRequestMatcher, MockRequestMethodMatcher};
 ///
 /// const ABCI_INFO_RESPONSE: &str = r#"{

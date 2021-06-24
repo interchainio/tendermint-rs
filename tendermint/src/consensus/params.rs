@@ -1,10 +1,9 @@
 //! Tendermint consensus parameters
 
+use crate::Error;
 use crate::{block, evidence, public_key};
-use crate::{Error, Kind};
 use serde::{Deserialize, Serialize};
-use std::convert::{TryFrom, TryInto};
-use tendermint_proto::abci::ConsensusParams as RawParams;
+use std::convert::TryFrom;
 use tendermint_proto::types::ValidatorParams as RawValidatorParams;
 use tendermint_proto::types::VersionParams as RawVersionParams;
 use tendermint_proto::Protobuf;
@@ -24,39 +23,6 @@ pub struct Params {
     /// Version parameters
     #[serde(skip)] // Todo: FIXME kvstore /genesis returns '{}' instead of '{app_version: "0"}'
     pub version: Option<VersionParams>,
-}
-
-impl Protobuf<RawParams> for Params {}
-
-impl TryFrom<RawParams> for Params {
-    type Error = Error;
-
-    fn try_from(value: RawParams) -> Result<Self, Self::Error> {
-        Ok(Self {
-            block: value.block.ok_or(Kind::InvalidBlock)?.try_into()?,
-            evidence: value.evidence.ok_or(Kind::InvalidEvidence)?.try_into()?,
-            validator: value
-                .validator
-                .ok_or(Kind::InvalidValidatorParams)?
-                .try_into()?,
-            version: value
-                .version
-                .map(TryFrom::try_from)
-                .transpose()
-                .map_err(|_| Kind::InvalidVersionParams)?,
-        })
-    }
-}
-
-impl From<Params> for RawParams {
-    fn from(value: Params) -> Self {
-        RawParams {
-            block: Some(value.block.into()),
-            evidence: Some(value.evidence.into()),
-            validator: Some(value.validator.into()),
-            version: value.version.map(From::from),
-        }
-    }
 }
 
 /// Validator consensus parameters

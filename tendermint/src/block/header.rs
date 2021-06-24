@@ -13,7 +13,7 @@ use tendermint_proto::Protobuf;
 /// previous block, and the results returned by the application.
 ///
 /// <https://github.com/tendermint/spec/blob/d46cd7f573a2c6a2399fcab2cde981330aa63f37/spec/core/data_structures.md#header>
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(try_from = "RawHeader", into = "RawHeader")]
 pub struct Header {
     /// Header version
@@ -197,7 +197,7 @@ impl Header {
 /// application.
 ///
 /// <https://github.com/tendermint/spec/blob/d46cd7f573a2c6a2399fcab2cde981330aa63f37/spec/core/data_structures.md#version>
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Version {
     /// Block version
     pub block: u64,

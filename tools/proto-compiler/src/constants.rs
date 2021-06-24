@@ -6,7 +6,7 @@ pub const TENDERMINT_REPO: &str = "https://github.com/tendermint/tendermint";
 // Tag: v0.34.0-rc4
 // Branch: master
 // Commit ID (full length): d7d0ffea13c60c98b812d243ba5a2c375f341c15
-pub const TENDERMINT_COMMITISH: &str = "v0.34.0";
+pub const TENDERMINT_COMMITISH: &str = "570e24f9025fe5a2b946c330721458c4ad5c9e0a";
 
 /// Predefined custom attributes for message annotations
 const PRIMITIVE_ENUM: &str = r#"#[derive(::num_derive::FromPrimitive, ::num_derive::ToPrimitive)]"#;
@@ -20,8 +20,8 @@ const HEXSTRING: &str = r#"#[serde(with = "crate::serializers::bytes::hexstring"
 const BASE64STRING: &str = r#"#[serde(with = "crate::serializers::bytes::base64string")]"#;
 const VEC_BASE64STRING: &str = r#"#[serde(with = "crate::serializers::bytes::vec_base64string")]"#;
 const OPTIONAL: &str = r#"#[serde(with = "crate::serializers::optional")]"#;
-const VEC_SKIP_IF_EMPTY: &str =
-    r#"#[serde(skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]"#;
+const BYTES_SKIP_IF_EMPTY: &str =
+    r#"#[serde(skip_serializing_if = "bytes::Bytes::is_empty")]"#;
 const NULLABLEVECARRAY: &str = r#"#[serde(with = "crate::serializers::txs")]"#;
 const NULLABLE: &str = r#"#[serde(with = "crate::serializers::nullable")]"#;
 const ALIAS_POWER_QUOTED: &str =
@@ -90,7 +90,7 @@ pub static CUSTOM_FIELD_ATTRIBUTES: &[(&str, &str)] = &[
     (".tendermint.version.Consensus.app", QUOTED_WITH_DEFAULT),
     (
         ".tendermint.abci.ResponseInfo.last_block_app_hash",
-        VEC_SKIP_IF_EMPTY,
+        BYTES_SKIP_IF_EMPTY,
     ),
     (".tendermint.abci.ResponseInfo.app_version", QUOTED),
     (".tendermint.types.BlockID.hash", HEXSTRING),
